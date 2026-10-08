@@ -1,13 +1,11 @@
-const { default: mongoose } = require("mongoose");
+const { param } = require("express-validator");
+const validation = require("./validation");
 
-const id = (req, res, next) => {
-    const id = req.params.id;
+const id = [
+    param("id").isMongoId().withMessage("Invalid Id"),
 
-    if(!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(404).json({ message: "Invalid ID" })
-    }
-
-    next();
-}
+    // required
+    validation
+]
 
 module.exports = id;

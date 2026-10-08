@@ -1,0 +1,10 @@
+// #Course: 
+// { title, desc, price, level, teacherId }
+// #Student:
+// { name, phone, email }
+// #Teacher:
+// { name, specalization }
+// #Profile:
+// { username, studentId }
+// #StudentCourse:
+// { studentId, courseId, date, status, grade }
