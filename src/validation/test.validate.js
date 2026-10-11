@@ -13,8 +13,8 @@ const test = [
     body("title").custom(async (val) => {
         const post = await Post.findOne({ title: val });
 
-        if(post) throw new Error("Title must be unique");
+        if(post) throw new Error("Title must be unique"); // stop
 
-        return true;
+        return true; // next
     })
 ];
