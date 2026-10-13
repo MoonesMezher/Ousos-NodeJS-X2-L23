@@ -21,6 +21,19 @@ const signUpUserValidation = [
     validation
 ]
 
+const signInUserValidation = [
+    body("email")
+        .not().isEmpty().withMessage("Email is required")
+        .isEmail().withMessage("Invalid Email"),
+
+    body("password")
+        .not().isEmpty().withMessage("Password is required")
+        .isStrongPassword().withMessage("Invalid password"),
+
+    validation
+]
+
 module.exports = {
-    signUpUserValidation
+    signUpUserValidation,
+    signInUserValidation
 }
