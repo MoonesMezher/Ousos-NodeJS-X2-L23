@@ -12,6 +12,23 @@ const userSchema = new mongoose.Schema({
     },
     age: {
         type: Number
+    },
+    role: {
+        type: String,
+        enum: ["admin", "user"],
+        default: "user"
+    },
+    block: {
+        type: Boolean,
+        default: false
+    },
+    blockCount: {
+        type: Number,
+        default: 0
+    },
+    blockedUntil: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 const User = mongoose.model("User", userSchema);
