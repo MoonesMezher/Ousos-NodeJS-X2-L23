@@ -1,696 +1,1176 @@
 /* ============================================================
-   APPLICATION LOGIC
-   ============================================================
-   Organized into modules:
-   - State        → app-wide data (user, token, section)
-   - UI           → helpers (toast, loading, show/hide)
-   - APILog       → right-panel request/response logger
-   - Nav          → sidebar navigation
-   - Auth         → signin / signup / logout
-   - Profile      → view / update / change-password
-   - Posts        → full CRUD + filter + count
-   - Users        → admin panel (list / search / block / delete)
+   PULSE — COMMERCIAL APP LOGIC
    ============================================================ */
 
-// ── State ────────────────────────────────────────────────────
-const state = {
-  user: JSON.parse(localStorage.getItem("user") || "null"),
-  currentSection: "auth",
-};
-
-const isAdmin = () => state.user?.role === "admin";
-const isLoggedIn = () => !!API.getToken();
-
-// ── UI Helpers ───────────────────────────────────────────────
-const UI = {
-  // Show one section, hide others
-  showSection(name) {
-    document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
-    const el = document.getElementById(`section-${name}`);
-    if (el) el.classList.add("active");
-    state.currentSection = name;
-
-    // Update active nav item
-    document.querySelectorAll(".nav-item").forEach((a) => a.classList.remove("active"));
-    const navItem = document.querySelector(`.nav-item[data-section="${name}"]`);
-    if (navItem) navItem.classList.add("active");
-  },
-
-  // Show/hide sidebar user card and admin nav
-  updateSidebar() {
-    const userCard = document.getElementById("user-card");
-    const adminNav = document.getElementById("admin-nav");
-
-    if (isLoggedIn() && state.user) {
-      userCard.style.display = "flex";
-      document.getElementById("user-avatar-text").textContent =
-        state.user.email?.[0]?.toUpperCase() || "U";
-      document.getElementById("user-email-text").textContent = state.user.email || "";
-      document.getElementById("user-role-badge").textContent = state.user.role || "user";
-      document.getElementById("user-role-badge").className =
-        `role-badge ${state.user.role === "admin" ? "role-admin" : "role-user"}`;
-
-      if (isAdmin()) {
-        adminNav.style.display = "block";
-      } else {
-        adminNav.style.display = "none";
-      }
-    } else {
-      userCard.style.display = "none";
-      adminNav.style.display = "none";
+document.addEventListener("DOMContentLoaded", () => {
+  // ── Global State ────────────────────────────────────────────
+  const state = {
+    currentUser: null,
+    currentView: "feed",
+    feed: {
+      page: 1,
+      limit: 12,
+      status: "ALL",
+      privacy: "ALL",
+      search: "",
+      totalPages: 1,
+      totalCount: 0
+    },
+    admin: {
+      page: 1,
+      limit: 10,
+      search: "",
+      filter: "all",
+      totalPages: 1,
+      totalUsers: 0
     }
-  },
+  };
 
-  // Toast notification
-  toast(message, type = "default") {
-    const container = document.getElementById("toast-container");
+  // ── DOM References ──────────────────────────────────────────
+  const elements = {
+    // Nav
+    navFeed: document.getElementById("nav-feed"),
+    navMyPosts: document.getElementById("nav-my-posts"),
+    navAdmin: document.getElementById("nav-admin"),
+    navAuthButtons: document.getElementById("nav-auth-buttons"),
+    navUserPill: document.getElementById("nav-user-pill"),
+    headerAvatar: document.getElementById("header-avatar"),
+    headerUserEmail: document.getElementById("header-user-email"),
+    headerUserRole: document.getElementById("header-user-role"),
+    openSigninBtn: document.getElementById("open-signin-btn"),
+    quickCreateBtn: document.getElementById("quick-create-btn"),
+    userProfileTrigger: document.getElementById("user-profile-trigger"),
+    logoutBtn: document.getElementById("logout-btn"),
+    brandLogo: document.getElementById("brand-logo"),
+
+    // Views
+    viewFeed: document.getElementById("view-feed"),
+    viewMyPosts: document.getElementById("view-my-posts"),
+    viewAdmin: document.getElementById("view-admin"),
+
+    // Feed Composer
+    feedComposer: document.getElementById("feed-composer"),
+    composerAvatar: document.getElementById("composer-avatar"),
+    composerForm: document.getElementById("composer-form"),
+    composerContent: document.getElementById("composer-content"),
+    composerPrivacy: document.getElementById("composer-privacy"),
+    composerPrivacyLabel: document.getElementById("composer-privacy-label"),
+    charCount: document.getElementById("char-count"),
+
+    // Feed Toolbar & Content
+    feedSearch: document.getElementById("feed-search"),
+    clearSearchBtn: document.getElementById("clear-search-btn"),
+    statusFilterPills: document.getElementById("status-filter-pills"),
+    privacyFilterPills: document.getElementById("privacy-filter-pills"),
+    feedResultsCount: document.getElementById("feed-results-count"),
+    feedPerPage: document.getElementById("feed-per-page"),
+    postsContainer: document.getElementById("posts-container"),
+    feedPagination: document.getElementById("feed-pagination"),
+    prevPageBtn: document.getElementById("prev-page-btn"),
+    nextPageBtn: document.getElementById("next-page-btn"),
+    pageNumbersContainer: document.getElementById("page-numbers-container"),
+
+    // My Posts
+    myPostsContainer: document.getElementById("my-posts-container"),
+    myPostsCreateBtn: document.getElementById("my-posts-create-btn"),
+
+    // Admin Console
+    statTotalUsers: document.getElementById("stat-total-users"),
+    statActiveUsers: document.getElementById("stat-active-users"),
+    statBlockedUsers: document.getElementById("stat-blocked-users"),
+    statTotalPosts: document.getElementById("stat-total-posts"),
+    adminUsersSearch: document.getElementById("admin-users-search"),
+    adminFilterPills: document.getElementById("admin-filter-pills"),
+    adminUsersTbody: document.getElementById("admin-users-tbody"),
+    adminUsersInfo: document.getElementById("admin-users-info"),
+    adminPagination: document.getElementById("admin-pagination"),
+    adminPrevBtn: document.getElementById("admin-prev-btn"),
+    adminNextBtn: document.getElementById("admin-next-btn"),
+    adminPageIndicator: document.getElementById("admin-page-indicator"),
+
+    // Modals
+    authModal: document.getElementById("auth-modal"),
+    closeAuthModal: document.getElementById("close-auth-modal"),
+    signinForm: document.getElementById("signin-form"),
+    signupForm: document.getElementById("signup-form"),
+    signinEmail: document.getElementById("signin-email"),
+    signinPassword: document.getElementById("signin-password"),
+    signupEmail: document.getElementById("signup-email"),
+    signupPassword: document.getElementById("signup-password"),
+    demoAdminBtn: document.getElementById("demo-admin-btn"),
+    demoUserBtn: document.getElementById("demo-user-btn"),
+
+    profileModal: document.getElementById("profile-modal"),
+    closeProfileModal: document.getElementById("close-profile-modal"),
+    profileModalAvatar: document.getElementById("profile-modal-avatar"),
+    profileModalEmail: document.getElementById("profile-modal-email"),
+    profileModalRole: document.getElementById("profile-modal-role"),
+    profileModalAge: document.getElementById("profile-modal-age"),
+    profileModalBirth: document.getElementById("profile-modal-birth"),
+    updateAgeForm: document.getElementById("update-age-form"),
+    updateAgeInput: document.getElementById("update-age-input"),
+    changePasswordForm: document.getElementById("change-password-form"),
+    currentPasswordInput: document.getElementById("current-password-input"),
+    newPasswordInput: document.getElementById("new-password-input"),
+
+    editPostModal: document.getElementById("edit-post-modal"),
+    closeEditModal: document.getElementById("close-edit-modal"),
+    cancelEditBtn: document.getElementById("cancel-edit-btn"),
+    editPostForm: document.getElementById("edit-post-form"),
+    editPostId: document.getElementById("edit-post-id"),
+    editPostContent: document.getElementById("edit-post-content"),
+    editPostPrivacy: document.getElementById("edit-post-privacy"),
+    editPrivacyLabel: document.getElementById("edit-privacy-label"),
+
+    toastContainer: document.getElementById("toast-container")
+  };
+
+  // ── Helper: Avatar Colors ───────────────────────────────────
+  function getAvatarColor(str) {
+    if (!str) return "#6366f1";
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h = Math.abs(hash) % 360;
+    return `hsl(${h}, 65%, 45%)`;
+  }
+
+  function getInitials(email) {
+    if (!email) return "?";
+    return email.charAt(0).toUpperCase();
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return "recently";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
+
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  // ── Helper: Toasts ──────────────────────────────────────────
+  function showToast(message, type = "info") {
     const toast = document.createElement("div");
     toast.className = `toast toast-${type}`;
-    const icons = { success: "✓", error: "✕", warning: "⚠", default: "ℹ" };
-    toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.default}</span><span>${message}</span>`;
-    container.appendChild(toast);
-    setTimeout(() => toast.classList.add("toast-show"), 10);
+
+    const icon = type === "success" ? "✓" : type === "error" ? "✕" : "ℹ";
+    toast.innerHTML = `<span style="font-weight:700">${icon}</span> <span>${message}</span>`;
+
+    elements.toastContainer.appendChild(toast);
     setTimeout(() => {
-      toast.classList.remove("toast-show");
-      setTimeout(() => toast.remove(), 300);
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(10px) scale(0.95)";
+      setTimeout(() => toast.remove(), 250);
     }, 3500);
-  },
-
-  // Button loading state
-  setLoading(btn, loading) {
-    if (!btn) return;
-    if (loading) {
-      btn.dataset.originalText = btn.innerHTML;
-      btn.innerHTML = `<span class="spinner"></span> Loading...`;
-      btn.disabled = true;
-    } else {
-      btn.innerHTML = btn.dataset.originalText || btn.innerHTML;
-      btn.disabled = false;
-    }
-  },
-
-  // Render a JSON object as formatted code
-  renderJSON(data) {
-    return `<pre class="json-output">${JSON.stringify(data, null, 2)}</pre>`;
-  },
-
-  // Status code color class
-  statusClass(status) {
-    if (status >= 200 && status < 300) return "status-success";
-    if (status >= 400 && status < 500) return "status-warning";
-    if (status >= 500) return "status-error";
-    return "status-muted";
-  },
-
-  // Format date
-  formatDate(dateStr) {
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      month: "short", day: "numeric", year: "numeric",
-    });
-  },
-
-  // Modal
-  openModal(title, content) {
-    document.getElementById("modal-title").textContent = title;
-    document.getElementById("modal-body").innerHTML = content;
-    document.getElementById("modal-overlay").classList.add("active");
-  },
-
-  closeModal() {
-    document.getElementById("modal-overlay").classList.remove("active");
-    document.getElementById("modal-body").innerHTML = "";
-  },
-};
-
-// ── API Log Panel ─────────────────────────────────────────────
-const APILog = {
-  entries: [],
-  currentRequest: null,
-
-  init() {
-    // Wire callbacks into the API service
-    API.onRequest((req) => {
-      this.currentRequest = req;
-    });
-
-    API.onResponse((res) => {
-      const entry = { request: this.currentRequest, response: res };
-      this.entries.unshift(entry); // newest first
-      if (this.entries.length > 50) this.entries.pop();
-      this.render();
-    });
-
-    document.getElementById("clear-log-btn").addEventListener("click", () => {
-      this.entries = [];
-      this.render();
-    });
-
-    document.getElementById("toggle-log-btn").addEventListener("click", () => {
-      const panel = document.getElementById("api-log-panel");
-      panel.classList.toggle("collapsed");
-      document.getElementById("toggle-log-btn").textContent =
-        panel.classList.contains("collapsed") ? "‹" : "›";
-    });
-  },
-
-  methodClass(method) {
-    const map = { GET: "get", POST: "post", PUT: "put", PATCH: "patch", DELETE: "delete" };
-    return `method-${map[method] || "get"}`;
-  },
-
-  render() {
-    const container = document.getElementById("api-log-entries");
-    if (this.entries.length === 0) {
-      container.innerHTML = `
-        <div class="log-empty">
-          <div class="log-empty-icon">📡</div>
-          <p>No requests yet</p>
-          <small>Make an API call to see<br>request & response details here</small>
-        </div>`;
-      return;
-    }
-
-    container.innerHTML = this.entries.map((entry, i) => {
-      const req = entry.request;
-      const res = entry.response;
-      const time = req?.timestamp
-        ? req.timestamp.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-        : "";
-
-      const statusClass = UI.statusClass(res.status);
-      const statusText = res.status === 0 ? "Network Error" : `${res.status}`;
-
-      // Mask password in request body for display
-      let displayBody = req?.body ? { ...req.body } : null;
-      if (displayBody?.password) displayBody.password = "••••••••";
-      if (displayBody?.currentPassword) displayBody.currentPassword = "••••••••";
-      if (displayBody?.newPassword) displayBody.newPassword = "••••••••";
-
-      return `
-        <div class="log-entry" id="log-${i}">
-          <div class="log-entry-header" onclick="APILog.toggle(${i})">
-            <div class="log-entry-left">
-              <span class="method-badge ${this.methodClass(req?.method)}">${req?.method}</span>
-              <span class="log-path">${req?.path}</span>
-            </div>
-            <div class="log-entry-right">
-              <span class="log-status ${statusClass}">${statusText}</span>
-              <span class="log-duration">${res.duration}ms</span>
-              <span class="log-time">${time}</span>
-            </div>
-          </div>
-          <div class="log-entry-body" id="log-body-${i}" style="display:none">
-            ${displayBody ? `
-              <div class="log-section">
-                <span class="log-section-label">↑ Request Body</span>
-                <pre class="log-json">${JSON.stringify(displayBody, null, 2)}</pre>
-              </div>` : ""}
-            <div class="log-section">
-              <span class="log-section-label">↓ Response</span>
-              <pre class="log-json">${JSON.stringify(res.data, null, 2)}</pre>
-            </div>
-          </div>
-        </div>`;
-    }).join("");
-  },
-
-  toggle(i) {
-    const body = document.getElementById(`log-body-${i}`);
-    if (body) body.style.display = body.style.display === "none" ? "block" : "none";
-  },
-};
-
-// ── Navigation ───────────────────────────────────────────────
-const Nav = {
-  init() {
-    document.querySelectorAll(".nav-item").forEach((item) => {
-      item.addEventListener("click", (e) => {
-        e.preventDefault();
-        const section = item.dataset.section;
-        if (!isLoggedIn() && section !== "auth") {
-          UI.toast("Please sign in first", "warning");
-          return;
-        }
-        if (section === "users" && !isAdmin()) {
-          UI.toast("Admin access required", "error");
-          return;
-        }
-        UI.showSection(section);
-        if (section === "profile") Profile.load();
-        if (section === "posts") Posts.load();
-        if (section === "users") Users.load();
-      });
-    });
-
-    // Modal close
-    document.getElementById("modal-close").addEventListener("click", UI.closeModal);
-    document.getElementById("modal-overlay").addEventListener("click", (e) => {
-      if (e.target === e.currentTarget) UI.closeModal();
-    });
-  },
-};
-
-// ── Auth Module ───────────────────────────────────────────────
-const Auth = {
-  init() {
-    // Tabs
-    document.querySelectorAll(".auth-tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        document.querySelectorAll(".auth-tab").forEach((t) => t.classList.remove("active"));
-        document.querySelectorAll(".auth-panel").forEach((p) => p.classList.remove("active"));
-        tab.classList.add("active");
-        document.getElementById(`panel-${tab.dataset.tab}`).classList.add("active");
-      });
-    });
-
-    // Sign In form
-    document.getElementById("signin-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector("[type=submit]");
-      const email = document.getElementById("signin-email").value;
-      const password = document.getElementById("signin-password").value;
-      UI.setLoading(btn, true);
-      try {
-        const res = await API.users.signin(email, password);
-        if (res.ok) {
-          API.setToken(res.data.token);
-          const profileRes = await API.users.profile();
-          if (profileRes.ok) {
-            state.user = profileRes.data.user;
-            localStorage.setItem("user", JSON.stringify(state.user));
-          }
-          UI.toast("Signed in successfully!", "success");
-          UI.updateSidebar();
-          UI.showSection("posts");
-          Posts.load();
-        } else {
-          UI.toast(res.data.message || "Invalid credentials", "error");
-        }
-      } catch {
-        UI.toast("Network error — is the server running?", "error");
-      }
-      UI.setLoading(btn, false);
-    });
-
-    // Sign Up form
-    document.getElementById("signup-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector("[type=submit]");
-      const email = document.getElementById("signup-email").value;
-      const password = document.getElementById("signup-password").value;
-      UI.setLoading(btn, true);
-      try {
-        const res = await API.users.signup(email, password);
-        if (res.ok) {
-          UI.toast("Account created! Please sign in.", "success");
-          document.querySelector('.auth-tab[data-tab="signin"]').click();
-          document.getElementById("signin-email").value = email;
-        } else {
-          const errors = res.data.errors;
-          const msg = errors ? errors.map((e) => e.message).join(", ") : res.data.message;
-          UI.toast(msg || "Signup failed", "error");
-        }
-      } catch {
-        UI.toast("Network error — is the server running?", "error");
-      }
-      UI.setLoading(btn, false);
-    });
-
-    // Logout
-    document.getElementById("logout-btn").addEventListener("click", async () => {
-      await API.users.logout();
-      API.clearToken();
-      state.user = null;
-      localStorage.removeItem("user");
-      UI.updateSidebar();
-      UI.showSection("auth");
-      UI.toast("Logged out", "default");
-    });
-  },
-};
-
-// ── Profile Module ────────────────────────────────────────────
-const Profile = {
-  async load() {
-    const display = document.getElementById("profile-display");
-    display.innerHTML = `<div class="skeleton-block"></div>`;
-    const res = await API.users.profile();
-    if (res.ok) {
-      state.user = res.data.user;
-      localStorage.setItem("user", JSON.stringify(state.user));
-      UI.updateSidebar();
-      const u = state.user;
-      display.innerHTML = `
-        <div class="profile-card-inner">
-          <div class="profile-avatar">${u.email[0].toUpperCase()}</div>
-          <div class="profile-details">
-            <div class="profile-row"><span class="profile-label">Email</span><span>${u.email}</span></div>
-            <div class="profile-row"><span class="profile-label">Role</span>
-              <span class="role-badge ${u.role === "admin" ? "role-admin" : "role-user"}">${u.role}</span>
-            </div>
-            <div class="profile-row"><span class="profile-label">Age</span><span>${u.age ?? "—"}</span></div>
-            <div class="profile-row"><span class="profile-label">Block Count</span><span>${u.blockCount}</span></div>
-            <div class="profile-row"><span class="profile-label">Status</span>
-              <span class="${u.block ? "badge-destructive" : "badge-success"}">${u.block ? "Blocked" : "Active"}</span>
-            </div>
-            <div class="profile-row"><span class="profile-label">Member Since</span><span>${UI.formatDate(u.createdAt)}</span></div>
-          </div>
-        </div>`;
-      if (u.age) document.getElementById("profile-age").value = u.age;
-    } else {
-      display.innerHTML = `<div class="error-text">${res.data.message}</div>`;
-    }
-  },
-
-  init() {
-    document.getElementById("update-profile-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector("[type=submit]");
-      const age = parseInt(document.getElementById("profile-age").value);
-      UI.setLoading(btn, true);
-      const res = await API.users.updateProfile(age);
-      UI.setLoading(btn, false);
-      if (res.ok) {
-        UI.toast("Profile updated!", "success");
-        Profile.load();
-      } else {
-        UI.toast(res.data.message || "Update failed", "error");
-      }
-    });
-
-    document.getElementById("change-password-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector("[type=submit]");
-      const cur = document.getElementById("current-password").value;
-      const nw = document.getElementById("new-password").value;
-      UI.setLoading(btn, true);
-      const res = await API.users.changePassword(cur, nw);
-      UI.setLoading(btn, false);
-      if (res.ok) {
-        UI.toast("Password changed!", "success");
-        e.target.reset();
-      } else {
-        UI.toast(res.data.message || "Failed", "error");
-      }
-    });
-  },
-};
-
-// ── Posts Module ──────────────────────────────────────────────
-const Posts = {
-  list: [],
-
-  async load() {
-    const grid = document.getElementById("posts-grid");
-    grid.innerHTML = `<div class="loading-state"><span class="spinner-lg"></span><p>Loading posts...</p></div>`;
-    const [postsRes, countRes] = await Promise.all([API.posts.getAll(), API.posts.count()]);
-    if (postsRes.ok) {
-      this.list = postsRes.data.posts;
-      document.getElementById("posts-count-badge").textContent =
-        `${countRes.ok ? countRes.data.total : this.list.length} posts`;
-      this.render(this.list);
-    } else {
-      grid.innerHTML = `<div class="error-state">${postsRes.data.message}</div>`;
-    }
-  },
-
-  render(posts) {
-    const grid = document.getElementById("posts-grid");
-    if (!posts.length) {
-      grid.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">📭</div>
-          <p>No posts found</p>
-          <small>Create the first post!</small>
-        </div>`;
-      return;
-    }
-
-    const statusMap = { Happy: "status-happy", Sad: "status-sad", Funny: "status-funny" };
-
-    grid.innerHTML = posts.map((p) => `
-      <div class="post-card" data-id="${p._id}">
-        <div class="post-card-header">
-          <span class="post-status-badge ${statusMap[p.status] || ""}">${p.status || "—"}</span>
-          <span class="post-privacy" title="${p.privacy ? "Private" : "Public"}">
-            ${p.privacy ? "🔒" : "🌐"}
-          </span>
-        </div>
-        <div class="post-content">${p.content}</div>
-        <div class="post-card-footer">
-          <span class="post-date">${UI.formatDate(p.createdAt)}</span>
-          <div class="post-actions">
-            <button class="btn btn-ghost btn-xs" onclick="Posts.openEdit('${p._id}', '${p.content.replace(/'/g, "\\'")}', '${p.status}')">Edit</button>
-            <button class="btn btn-ghost btn-xs" onclick="Posts.togglePrivacy('${p._id}')">
-              ${p.privacy ? "Make Public" : "Make Private"}
-            </button>
-            <button class="btn btn-destructive-ghost btn-xs" onclick="Posts.remove('${p._id}')">Delete</button>
-          </div>
-        </div>
-      </div>`).join("");
-  },
-
-  async filter() {
-    const status = document.getElementById("filter-status").value;
-    const privacy = document.getElementById("filter-privacy").value;
-    const params = {};
-    if (status) params.status = status;
-    if (privacy !== "") params.privacy = privacy;
-    const res = await API.posts.filter(params);
-    if (res.ok) {
-      this.render(res.data.posts);
-      document.getElementById("posts-count-badge").textContent = `${res.data.count} posts`;
-    } else {
-      UI.toast(res.data.message || "Filter failed", "error");
-    }
-  },
-
-  openCreate() {
-    UI.openModal("Create Post", `
-      <form id="create-post-form">
-        <div class="form-group">
-          <label class="label">Content <span class="hint-inline">(5–20 chars)</span></label>
-          <textarea class="input textarea" id="modal-content" rows="3" maxlength="20" placeholder="Write something..." required></textarea>
-        </div>
-        <div class="form-group">
-          <label class="label">Status</label>
-          <select class="input select" id="modal-status" required>
-            <option value="">Select status</option>
-            <option value="Happy">😊 Happy</option>
-            <option value="Sad">😢 Sad</option>
-            <option value="Funny">😂 Funny</option>
-          </select>
-        </div>
-        <div class="modal-footer-btns">
-          <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Post</button>
-        </div>
-      </form>`);
-
-    document.getElementById("create-post-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector('[type=submit]');
-      const content = document.getElementById("modal-content").value;
-      const status = document.getElementById("modal-status").value;
-      UI.setLoading(btn, true);
-      const res = await API.posts.create(content, status);
-      UI.setLoading(btn, false);
-      if (res.ok) {
-        UI.closeModal();
-        UI.toast("Post created!", "success");
-        Posts.load();
-      } else {
-        const errors = res.data.errors;
-        const msg = errors ? errors.map((e) => e.message).join(", ") : res.data.message;
-        UI.toast(msg || "Failed", "error");
-      }
-    });
-  },
-
-  openEdit(id, content, status) {
-    UI.openModal("Edit Post", `
-      <form id="edit-post-form">
-        <div class="form-group">
-          <label class="label">Content <span class="hint-inline">(5–20 chars)</span></label>
-          <textarea class="input textarea" id="edit-content" rows="3" maxlength="20" required>${content}</textarea>
-        </div>
-        <div class="form-group">
-          <label class="label">Status</label>
-          <select class="input select" id="edit-status" required>
-            <option value="Happy" ${status === "Happy" ? "selected" : ""}>😊 Happy</option>
-            <option value="Sad" ${status === "Sad" ? "selected" : ""}>😢 Sad</option>
-            <option value="Funny" ${status === "Funny" ? "selected" : ""}>😂 Funny</option>
-          </select>
-        </div>
-        <div class="modal-footer-btns">
-          <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save Changes</button>
-        </div>
-      </form>`);
-
-    document.getElementById("edit-post-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector('[type=submit]');
-      const newContent = document.getElementById("edit-content").value;
-      const newStatus = document.getElementById("edit-status").value;
-      UI.setLoading(btn, true);
-      const res = await API.posts.update(id, newContent, newStatus);
-      UI.setLoading(btn, false);
-      if (res.ok) {
-        UI.closeModal();
-        UI.toast("Post updated!", "success");
-        Posts.load();
-      } else {
-        const errors = res.data.errors;
-        const msg = errors ? errors.map((e) => e.message).join(", ") : res.data.message;
-        UI.toast(msg || "Failed", "error");
-      }
-    });
-  },
-
-  async togglePrivacy(id) {
-    const res = await API.posts.togglePrivacy(id);
-    if (res.ok) {
-      UI.toast(`Privacy set to ${res.data.post.privacy ? "Private 🔒" : "Public 🌐"}`, "success");
-      Posts.load();
-    } else {
-      UI.toast(res.data.message || "Failed", "error");
-    }
-  },
-
-  async remove(id) {
-    if (!confirm("Delete this post?")) return;
-    const res = await API.posts.delete(id);
-    if (res.ok) {
-      UI.toast("Post deleted", "success");
-      Posts.load();
-    } else {
-      UI.toast(res.data.message || "Failed", "error");
-    }
-  },
-
-  init() {
-    document.getElementById("create-post-btn").addEventListener("click", () => Posts.openCreate());
-    document.getElementById("load-posts-btn").addEventListener("click", () => Posts.load());
-    document.getElementById("filter-btn").addEventListener("click", () => Posts.filter());
-    document.getElementById("reset-filter-btn").addEventListener("click", () => {
-      document.getElementById("filter-status").value = "";
-      document.getElementById("filter-privacy").value = "";
-      Posts.load();
-    });
-  },
-};
-
-// ── Users Module (Admin) ──────────────────────────────────────
-const Users = {
-  async load() {
-    document.getElementById("users-search-input").value = "";
-    const res = await API.users.getAll();
-    if (res.ok) {
-      this.render(res.data.users);
-      document.getElementById("users-count-badge").textContent = `${res.data.users.length} users`;
-    } else {
-      UI.toast(res.data.message || "Failed to load users", "error");
-    }
-  },
-
-  async loadBlocked() {
-    const res = await API.users.getBlocked();
-    if (res.ok) {
-      this.render(res.data.users);
-      document.getElementById("users-count-badge").textContent = `${res.data.count} blocked`;
-    }
-  },
-
-  async search() {
-    const email = document.getElementById("users-search-input").value.trim();
-    if (!email) { this.load(); return; }
-    const res = await API.users.search(email);
-    if (res.ok) {
-      this.render(res.data.users);
-      document.getElementById("users-count-badge").textContent = `${res.data.count} found`;
-    }
-  },
-
-  render(users) {
-    const table = document.getElementById("users-table-body");
-    if (!users.length) {
-      table.innerHTML = `<tr><td colspan="6" class="table-empty">No users found</td></tr>`;
-      return;
-    }
-    table.innerHTML = users.map((u) => `
-      <tr>
-        <td>
-          <div class="user-cell">
-            <div class="user-avatar-sm">${u.email[0].toUpperCase()}</div>
-            <span>${u.email}</span>
-          </div>
-        </td>
-        <td><span class="role-badge ${u.role === "admin" ? "role-admin" : "role-user"}">${u.role}</span></td>
-        <td>${u.age ?? "—"}</td>
-        <td>${u.blockCount}</td>
-        <td>
-          <span class="${u.block ? "badge-destructive" : "badge-success"}">
-            ${u.block ? "Blocked" : "Active"}
-          </span>
-        </td>
-        <td>
-          <div class="table-actions">
-            ${u.block
-              ? `<button class="btn btn-outline btn-xs" onclick="Users.unblock('${u._id}')">Unblock</button>`
-              : `<button class="btn btn-outline btn-xs" onclick="Users.block('${u._id}')">Block</button>`
-            }
-            <button class="btn btn-destructive-ghost btn-xs" onclick="Users.remove('${u._id}')">Delete</button>
-          </div>
-        </td>
-      </tr>`).join("");
-  },
-
-  async block(id) {
-    if (!confirm("Block this user?")) return;
-    const res = await API.users.block(id);
-    if (res.ok) { UI.toast("User blocked", "success"); Users.load(); }
-    else UI.toast(res.data.message || "Failed", "error");
-  },
-
-  async unblock(id) {
-    const res = await API.users.unblock(id);
-    if (res.ok) { UI.toast("User unblocked", "success"); Users.load(); }
-    else UI.toast(res.data.message || "Failed", "error");
-  },
-
-  async remove(id) {
-    if (!confirm("Delete this user permanently?")) return;
-    const res = await API.users.delete(id);
-    if (res.ok) { UI.toast("User deleted", "success"); Users.load(); }
-    else UI.toast(res.data.message || "Failed", "error");
-  },
-
-  init() {
-    document.getElementById("load-users-btn").addEventListener("click", () => Users.load());
-    document.getElementById("blocked-users-btn").addEventListener("click", () => Users.loadBlocked());
-    document.getElementById("search-users-btn").addEventListener("click", () => Users.search());
-    document.getElementById("users-search-input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") Users.search();
-    });
-  },
-};
-
-// ── App Initialization ────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-  APILog.init();
-  Nav.init();
-  Auth.init();
-  Profile.init();
-  Posts.init();
-  Users.init();
-  UI.updateSidebar();
-
-  // Go to posts if already signed in, else auth
-  if (isLoggedIn() && state.user) {
-    UI.showSection("posts");
-    Posts.load();
-  } else {
-    UI.showSection("auth");
   }
+
+  // ── Navigation & View Switching ─────────────────────────────
+  function switchView(viewName) {
+    state.currentView = viewName;
+
+    // Nav pills active state
+    document.querySelectorAll(".nav-tab").forEach(tab => {
+      tab.classList.toggle("active", tab.dataset.view === viewName);
+    });
+
+    // View sections
+    elements.viewFeed.classList.toggle("active", viewName === "feed");
+    elements.viewMyPosts.classList.toggle("active", viewName === "my-posts");
+    elements.viewAdmin.classList.toggle("active", viewName === "admin");
+
+    if (viewName === "feed") {
+      loadFeed();
+    } else if (viewName === "my-posts") {
+      loadMyPosts();
+    } else if (viewName === "admin") {
+      loadAdminView();
+    }
+  }
+
+  // ── Authentication & Session ────────────────────────────────
+  async function initSession() {
+    const token = API.getToken();
+    if (!token) {
+      updateNavForGuest();
+      return;
+    }
+
+    try {
+      const res = await API.users.profile();
+      if (res.ok && res.data && res.data.user) {
+        state.currentUser = res.data.user;
+        updateNavForUser(state.currentUser);
+      } else {
+        API.clearToken();
+        state.currentUser = null;
+        updateNavForGuest();
+      }
+    } catch (_) {
+      API.clearToken();
+      state.currentUser = null;
+      updateNavForGuest();
+    }
+  }
+
+  function updateNavForGuest() {
+    elements.navAuthButtons.style.display = "block";
+    elements.navUserPill.style.display = "none";
+    elements.navMyPosts.style.display = "none";
+    elements.navAdmin.style.display = "none";
+    elements.composerAvatar.textContent = "?";
+    elements.composerAvatar.style.background = "#27272a";
+  }
+
+  function updateNavForUser(user) {
+    elements.navAuthButtons.style.display = "none";
+    elements.navUserPill.style.display = "flex";
+    elements.navMyPosts.style.display = "flex";
+
+    const initials = getInitials(user.email);
+    const color = getAvatarColor(user.email);
+
+    elements.headerAvatar.textContent = initials;
+    elements.headerAvatar.style.background = color;
+    elements.headerUserEmail.textContent = user.email;
+    elements.headerUserRole.textContent = user.role;
+    elements.headerUserRole.className = `role-badge role-${user.role}`;
+
+    elements.composerAvatar.textContent = initials;
+    elements.composerAvatar.style.background = color;
+
+    // Show admin tab only for admins
+    if (user.role === "admin") {
+      elements.navAdmin.style.display = "flex";
+    } else {
+      elements.navAdmin.style.display = "none";
+    }
+  }
+
+  // ── Feed Post Composer ──────────────────────────────────────
+  elements.composerContent.addEventListener("input", (e) => {
+    const len = e.target.value.length;
+    elements.charCount.textContent = len;
+    if (len > 280) {
+      elements.charCount.style.color = "var(--destructive)";
+    } else {
+      elements.charCount.style.color = "var(--text-muted)";
+    }
+  });
+
+  elements.composerPrivacy.addEventListener("change", (e) => {
+    elements.composerPrivacyLabel.textContent = e.target.checked ? "🔒 Private Post" : "🌐 Public Post";
+  });
+
+  elements.composerForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    if (!state.currentUser) {
+      showToast("Please sign in to publish a post", "info");
+      openAuthModal("signin");
+      return;
+    }
+
+    const content = elements.composerContent.value.trim();
+    if (content.length < 3 || content.length > 280) {
+      showToast("Post content must be between 3 and 280 characters", "error");
+      return;
+    }
+
+    const statusRadio = document.querySelector('input[name="post-status"]:checked');
+    const status = statusRadio ? statusRadio.value : "Happy";
+    const privacy = elements.composerPrivacy.checked;
+
+    try {
+      const res = await API.posts.create(content, status, privacy);
+      if (res.ok) {
+        showToast("Post published successfully!", "success");
+        elements.composerContent.value = "";
+        elements.charCount.textContent = "0";
+        elements.composerPrivacy.checked = false;
+        elements.composerPrivacyLabel.textContent = "🌐 Public Post";
+        state.feed.page = 1;
+        loadFeed();
+      } else {
+        const errorMsg = res.data && res.data.message ? res.data.message : "Failed to create post";
+        showToast(errorMsg, "error");
+      }
+    } catch (err) {
+      showToast("Network error publishing post", "error");
+    }
+  });
+
+  // ── Render Post Card ────────────────────────────────────────
+  function renderPostCard(post) {
+    const isOwner = state.currentUser && post.user && (
+      (typeof post.user === "object" && post.user._id === state.currentUser._id) ||
+      (typeof post.user === "string" && post.user === state.currentUser._id)
+    );
+    const isAdmin = state.currentUser && state.currentUser.role === "admin";
+    const canManage = isOwner || isAdmin;
+
+    const authorEmail = post.user && typeof post.user === "object" ? post.user.email : "Anonymous";
+    const authorRole = post.user && typeof post.user === "object" ? post.user.role : "user";
+    const initials = getInitials(authorEmail);
+    const color = getAvatarColor(authorEmail);
+
+    const card = document.createElement("article");
+    card.className = "post-card";
+    card.id = `post-${post._id}`;
+
+    const moodEmoji = post.status === "Happy" ? "😊" : post.status === "Funny" ? "😂" : "😢";
+
+    card.innerHTML = `
+      <div class="post-card-header">
+        <div class="author-info">
+          <div class="avatar avatar-md" style="background:${color}">${initials}</div>
+          <div class="author-meta">
+            <div class="author-email-row">
+              <span class="author-email">${authorEmail}</span>
+              ${authorRole === "admin" ? '<span class="role-badge role-admin">Admin</span>' : ''}
+            </div>
+            <span class="post-timestamp">${formatDate(post.createdAt)}</span>
+          </div>
+        </div>
+        <div class="post-badges">
+          <span class="mood-badge ${post.status}">${moodEmoji} ${post.status}</span>
+          <span class="visibility-badge ${post.privacy ? 'visibility-private' : 'visibility-public'}">
+            ${post.privacy ? '🔒 Private' : '🌐 Public'}
+          </span>
+        </div>
+      </div>
+
+      <div class="post-content">${escapeHTML(post.content)}</div>
+
+      <div class="post-card-footer">
+        <span class="post-meta-sub">${post.privacy ? 'Only visible to you' : 'Shared with community'}</span>
+        ${canManage ? `
+          <div class="post-actions">
+            <button class="action-btn toggle-privacy-btn" data-id="${post._id}" title="Toggle Privacy">
+              ${post.privacy ? 'Make Public' : 'Make Private'}
+            </button>
+            <button class="action-btn edit-post-btn" data-id="${post._id}" title="Edit Post">
+              ✏️ Edit
+            </button>
+            <button class="action-btn delete-btn delete-post-btn" data-id="${post._id}" title="Delete Post">
+              🗑️ Delete
+            </button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    return card;
+  }
+
+  function escapeHTML(str) {
+    if (!str) return "";
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  // ── Load Feed ───────────────────────────────────────────────
+  async function loadFeed() {
+    elements.postsContainer.innerHTML = `
+      <div class="empty-state" style="border:none">
+        <p>Loading community posts...</p>
+      </div>
+    `;
+
+    try {
+      const res = await API.posts.getAll({
+        page: state.feed.page,
+        limit: state.feed.limit,
+        status: state.feed.status,
+        privacy: state.feed.privacy,
+        search: state.feed.search
+      });
+
+      if (!res.ok) {
+        elements.postsContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">⚠️</div>
+            <h3>Unable to load posts</h3>
+            <p>${res.data && res.data.message ? res.data.message : 'Please check connection'}</p>
+            <button class="btn btn-outline btn-sm" onclick="location.reload()">Retry</button>
+          </div>
+        `;
+        return;
+      }
+
+      const items = res.data.items || res.data.posts || [];
+      const pagination = res.data.pagination || { total: items.length, pages: 1, page: 1 };
+
+      state.feed.totalPages = pagination.pages;
+      state.feed.totalCount = pagination.total;
+
+      // Update summary bar
+      const start = items.length > 0 ? (pagination.page - 1) * pagination.limit + 1 : 0;
+      const end = Math.min(pagination.page * pagination.limit, pagination.total);
+      elements.feedResultsCount.textContent = `Showing ${start}–${end} of ${pagination.total} posts`;
+
+      if (items.length === 0) {
+        elements.postsContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">💬</div>
+            <h3>No posts found</h3>
+            <p>Try adjusting your search or mood filter, or be the first to publish a post!</p>
+          </div>
+        `;
+        elements.feedPagination.style.display = "none";
+        return;
+      }
+
+      elements.postsContainer.innerHTML = "";
+      items.forEach(post => {
+        elements.postsContainer.appendChild(renderPostCard(post));
+      });
+
+      renderFeedPagination(pagination);
+      attachPostActionListeners();
+
+    } catch (err) {
+      elements.postsContainer.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⚠️</div>
+          <h3>Failed to connect to server</h3>
+          <p>Please make sure the backend server is running.</p>
+        </div>
+      `;
+    }
+  }
+
+  // ── Feed Pagination ─────────────────────────────────────────
+  function renderFeedPagination(pagination) {
+    if (pagination.pages <= 1) {
+      elements.feedPagination.style.display = "none";
+      return;
+    }
+
+    elements.feedPagination.style.display = "flex";
+    elements.prevPageBtn.disabled = !pagination.isPrev;
+    elements.nextPageBtn.disabled = !pagination.isNext;
+
+    elements.pageNumbersContainer.innerHTML = "";
+
+    const current = pagination.page;
+    const total = pagination.pages;
+    const pagesToShow = [];
+
+    if (total <= 7) {
+      for (let i = 1; i <= total; i++) pagesToShow.push(i);
+    } else {
+      pagesToShow.push(1);
+      if (current > 3) pagesToShow.push("...");
+
+      const start = Math.max(2, current - 1);
+      const end = Math.min(total - 1, current + 1);
+      for (let i = start; i <= end; i++) {
+        pagesToShow.push(i);
+      }
+
+      if (current < total - 2) pagesToShow.push("...");
+      pagesToShow.push(total);
+    }
+
+    pagesToShow.forEach(p => {
+      if (p === "...") {
+        const span = document.createElement("span");
+        span.className = "page-ellipsis";
+        span.textContent = "…";
+        elements.pageNumbersContainer.appendChild(span);
+      } else {
+        const btn = document.createElement("button");
+        btn.className = `page-btn ${p === current ? 'active' : ''}`;
+        btn.textContent = p;
+        btn.addEventListener("click", () => {
+          if (p !== current) {
+            state.feed.page = p;
+            loadFeed();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }
+        });
+        elements.pageNumbersContainer.appendChild(btn);
+      }
+    });
+  }
+
+  elements.prevPageBtn.addEventListener("click", () => {
+    if (state.feed.page > 1) {
+      state.feed.page--;
+      loadFeed();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  });
+
+  elements.nextPageBtn.addEventListener("click", () => {
+    if (state.feed.page < state.feed.totalPages) {
+      state.feed.page++;
+      loadFeed();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  });
+
+  // ── Post Actions (Toggle, Edit, Delete) ──────────────────────
+  function attachPostActionListeners() {
+    // Privacy toggle
+    document.querySelectorAll(".toggle-privacy-btn").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.id;
+        try {
+          const res = await API.posts.togglePrivacy(id);
+          if (res.ok) {
+            showToast("Post visibility updated", "success");
+            if (state.currentView === "my-posts") {
+              loadMyPosts();
+            } else {
+              loadFeed();
+            }
+          } else {
+            showToast(res.data?.message || "Failed to update privacy", "error");
+          }
+        } catch (_) {
+          showToast("Network error", "error");
+        }
+      });
+    });
+
+    // Edit Post
+    document.querySelectorAll(".edit-post-btn").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.id;
+        try {
+          const res = await API.posts.getById(id);
+          if (res.ok && res.data && res.data.post) {
+            openEditModal(res.data.post);
+          } else {
+            showToast("Could not load post details", "error");
+          }
+        } catch (_) {
+          showToast("Network error", "error");
+        }
+      });
+    });
+
+    // Delete Post
+    document.querySelectorAll(".delete-post-btn").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.id;
+        if (!confirm("Are you sure you want to delete this post?")) return;
+
+        try {
+          const res = await API.posts.delete(id);
+          if (res.ok) {
+            showToast("Post deleted successfully", "success");
+            if (state.currentView === "my-posts") {
+              loadMyPosts();
+            } else {
+              loadFeed();
+            }
+          } else {
+            showToast(res.data?.message || "Failed to delete post", "error");
+          }
+        } catch (_) {
+          showToast("Network error", "error");
+        }
+      });
+    });
+  }
+
+  // ── Edit Post Modal ─────────────────────────────────────────
+  function openEditModal(post) {
+    elements.editPostId.value = post._id;
+    elements.editPostContent.value = post.content;
+    elements.editPostPrivacy.checked = !!post.privacy;
+    elements.editPrivacyLabel.textContent = post.privacy ? "🔒 Private Post" : "🌐 Public Post";
+
+    const radio = document.querySelector(`input[name="edit-post-status"][value="${post.status}"]`);
+    if (radio) radio.checked = true;
+
+    elements.editPostModal.classList.add("active");
+  }
+
+  elements.editPostPrivacy.addEventListener("change", (e) => {
+    elements.editPrivacyLabel.textContent = e.target.checked ? "🔒 Private Post" : "🌐 Public Post";
+  });
+
+  elements.closeEditModal.addEventListener("click", () => elements.editPostModal.classList.remove("active"));
+  elements.cancelEditBtn.addEventListener("click", () => elements.editPostModal.classList.remove("active"));
+
+  elements.editPostForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const id = elements.editPostId.value;
+    const content = elements.editPostContent.value.trim();
+    const statusRadio = document.querySelector('input[name="edit-post-status"]:checked');
+    const status = statusRadio ? statusRadio.value : "Happy";
+    const privacy = elements.editPostPrivacy.checked;
+
+    if (content.length < 3 || content.length > 280) {
+      showToast("Content must be between 3 and 280 characters", "error");
+      return;
+    }
+
+    try {
+      const res = await API.posts.update(id, content, status, privacy);
+      if (res.ok) {
+        showToast("Post updated successfully", "success");
+        elements.editPostModal.classList.remove("active");
+        if (state.currentView === "my-posts") {
+          loadMyPosts();
+        } else {
+          loadFeed();
+        }
+      } else {
+        showToast(res.data?.message || "Failed to update post", "error");
+      }
+    } catch (_) {
+      showToast("Network error updating post", "error");
+    }
+  });
+
+  // ── Feed Filter Handlers ────────────────────────────────────
+  elements.statusFilterPills.addEventListener("click", (e) => {
+    const pill = e.target.closest(".filter-pill");
+    if (!pill) return;
+
+    elements.statusFilterPills.querySelectorAll(".filter-pill").forEach(p => p.classList.remove("active"));
+    pill.classList.add("active");
+
+    state.feed.status = pill.dataset.filterStatus;
+    state.feed.page = 1;
+    loadFeed();
+  });
+
+  elements.privacyFilterPills.addEventListener("click", (e) => {
+    const pill = e.target.closest(".filter-pill");
+    if (!pill) return;
+
+    elements.privacyFilterPills.querySelectorAll(".filter-pill").forEach(p => p.classList.remove("active"));
+    pill.classList.add("active");
+
+    state.feed.privacy = pill.dataset.filterPrivacy;
+    state.feed.page = 1;
+    loadFeed();
+  });
+
+  // Search Debounce
+  let searchTimeout = null;
+  elements.feedSearch.addEventListener("input", (e) => {
+    const val = e.target.value.trim();
+    elements.clearSearchBtn.style.display = val ? "block" : "none";
+
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      state.feed.search = val;
+      state.feed.page = 1;
+      loadFeed();
+    }, 350);
+  });
+
+  elements.clearSearchBtn.addEventListener("click", () => {
+    elements.feedSearch.value = "";
+    elements.clearSearchBtn.style.display = "none";
+    state.feed.search = "";
+    state.feed.page = 1;
+    loadFeed();
+  });
+
+  elements.feedPerPage.addEventListener("change", (e) => {
+    state.feed.limit = parseInt(e.target.value, 10);
+    state.feed.page = 1;
+    loadFeed();
+  });
+
+  // ── My Posts View ───────────────────────────────────────────
+  async function loadMyPosts() {
+    if (!state.currentUser) {
+      elements.myPostsContainer.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">🔐</div>
+          <h3>Sign in required</h3>
+          <p>Please sign in to view and manage your posts.</p>
+          <button class="btn btn-primary btn-sm" id="my-posts-signin-prompt">Sign In</button>
+        </div>
+      `;
+      document.getElementById("my-posts-signin-prompt")?.addEventListener("click", () => openAuthModal("signin"));
+      return;
+    }
+
+    elements.myPostsContainer.innerHTML = `
+      <div class="empty-state" style="border:none">
+        <p>Loading your posts...</p>
+      </div>
+    `;
+
+    try {
+      const res = await API.posts.getAll({ user: "mine" });
+      if (!res.ok) {
+        showToast("Failed to load your posts", "error");
+        return;
+      }
+
+      const posts = res.data.posts || res.data.items || [];
+      if (posts.length === 0) {
+        elements.myPostsContainer.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">✍️</div>
+            <h3>No posts yet</h3>
+            <p>You haven't published any posts yet. Share your thoughts with the community!</p>
+            <button class="btn btn-primary btn-sm" id="my-posts-first-create">Create Your First Post</button>
+          </div>
+        `;
+        document.getElementById("my-posts-first-create")?.addEventListener("click", () => {
+          switchView("feed");
+          elements.composerContent.focus();
+        });
+        return;
+      }
+
+      elements.myPostsContainer.innerHTML = "";
+      posts.forEach(post => {
+        elements.myPostsContainer.appendChild(renderPostCard(post));
+      });
+      attachPostActionListeners();
+
+    } catch (_) {
+      elements.myPostsContainer.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⚠️</div>
+          <h3>Error loading posts</h3>
+          <p>Check connection and try again.</p>
+        </div>
+      `;
+    }
+  }
+
+  elements.myPostsCreateBtn.addEventListener("click", () => {
+    switchView("feed");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    elements.composerContent.focus();
+  });
+
+  // ── Admin Console ───────────────────────────────────────────
+  async function loadAdminView() {
+    if (!state.currentUser || state.currentUser.role !== "admin") {
+      switchView("feed");
+      showToast("Access restricted to administrators", "error");
+      return;
+    }
+
+    loadAdminStats();
+    loadAdminUsers();
+  }
+
+  async function loadAdminStats() {
+    try {
+      const [usersRes, postsRes] = await Promise.all([
+        API.users.stats(),
+        API.posts.count()
+      ]);
+
+      if (usersRes.ok && usersRes.data) {
+        elements.statTotalUsers.textContent = usersRes.data.totalUsers || 0;
+        elements.statActiveUsers.textContent = usersRes.data.activeUsers || 0;
+        elements.statBlockedUsers.textContent = usersRes.data.blockedUsers || 0;
+      }
+
+      if (postsRes.ok && postsRes.data) {
+        elements.statTotalPosts.textContent = postsRes.data.total || 0;
+      }
+    } catch (_) {}
+  }
+
+  async function loadAdminUsers() {
+    elements.adminUsersTbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="table-empty">Loading directory...</td>
+      </tr>
+    `;
+
+    const blockedParam = state.admin.filter === "blocked" ? "true" : state.admin.filter === "active" ? "false" : "";
+
+    try {
+      const res = await API.users.pagination(
+        state.admin.page,
+        state.admin.limit,
+        state.admin.search,
+        blockedParam
+      );
+
+      if (!res.ok) {
+        elements.adminUsersTbody.innerHTML = `
+          <tr>
+            <td colspan="7" class="table-empty">Failed to load users: ${res.data?.message || 'Error'}</td>
+          </tr>
+        `;
+        return;
+      }
+
+      const items = res.data.items || [];
+      const pagination = res.data.pagination || { total: items.length, pages: 1, page: 1 };
+
+      state.admin.totalPages = pagination.pages;
+      state.admin.totalUsers = pagination.total;
+
+      elements.adminPageIndicator.textContent = `${pagination.page} / ${pagination.pages || 1}`;
+      elements.adminPrevBtn.disabled = !pagination.isPrev;
+      elements.adminNextBtn.disabled = !pagination.isNext;
+      elements.adminUsersInfo.textContent = `Showing ${items.length} of ${pagination.total} registered users`;
+
+      if (items.length === 0) {
+        elements.adminUsersTbody.innerHTML = `
+          <tr>
+            <td colspan="7" class="table-empty">No users found matching query</td>
+          </tr>
+        `;
+        return;
+      }
+
+      elements.adminUsersTbody.innerHTML = "";
+      items.forEach(u => {
+        const initials = getInitials(u.email);
+        const color = getAvatarColor(u.email);
+        const estimatedBirth = u.age ? new Date().getFullYear() - u.age : "—";
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>
+            <div class="table-user-cell">
+              <div class="avatar avatar-sm" style="background:${color}">${initials}</div>
+              <span class="table-user-email">${u.email}</span>
+            </div>
+          </td>
+          <td>
+            <span class="role-badge role-${u.role}">${u.role}</span>
+          </td>
+          <td>${u.age || "—"}</td>
+          <td>${estimatedBirth}</td>
+          <td>${u.blockCount || 0}</td>
+          <td>
+            <span class="status-badge ${u.block ? 'status-blocked' : 'status-active'}">
+              ${u.block ? 'Blocked' : 'Active'}
+            </span>
+          </td>
+          <td style="text-align:right">
+            ${u.role !== "admin" ? `
+              <button class="action-btn admin-toggle-block-btn" data-id="${u._id}" data-blocked="${u.block}">
+                ${u.block ? '🔓 Unblock' : '🔒 Block'}
+              </button>
+              <button class="action-btn delete-btn admin-delete-user-btn" data-id="${u._id}" data-email="${u.email}">
+                🗑️ Delete
+              </button>
+            ` : '<span style="font-size:0.75rem;color:var(--text-muted)">Superadmin</span>'}
+          </td>
+        `;
+
+        elements.adminUsersTbody.appendChild(tr);
+      });
+
+      attachAdminActionListeners();
+
+    } catch (_) {
+      elements.adminUsersTbody.innerHTML = `
+        <tr>
+          <td colspan="7" class="table-empty">Network error loading users</td>
+        </tr>
+      `;
+    }
+  }
+
+  function attachAdminActionListeners() {
+    // Block / Unblock
+    document.querySelectorAll(".admin-toggle-block-btn").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.id;
+        const isBlocked = e.currentTarget.dataset.blocked === "true";
+
+        try {
+          const res = isBlocked ? await API.users.unblock(id) : await API.users.block(id);
+          if (res.ok) {
+            showToast(isBlocked ? "User unblocked successfully" : "User blocked successfully", "success");
+            loadAdminStats();
+            loadAdminUsers();
+          } else {
+            showToast(res.data?.message || "Action failed", "error");
+          }
+        } catch (_) {
+          showToast("Network error", "error");
+        }
+      });
+    });
+
+    // Delete User
+    document.querySelectorAll(".admin-delete-user-btn").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.id;
+        const email = e.currentTarget.dataset.email;
+
+        if (!confirm(`Are you sure you want to delete user ${email}? This action is irreversible.`)) return;
+
+        try {
+          const res = await API.users.delete(id);
+          if (res.ok) {
+            showToast(`User ${email} deleted`, "success");
+            loadAdminStats();
+            loadAdminUsers();
+          } else {
+            showToast(res.data?.message || "Failed to delete user", "error");
+          }
+        } catch (_) {
+          showToast("Network error", "error");
+        }
+      });
+    });
+  }
+
+  // Admin Pagination & Filters
+  elements.adminPrevBtn.addEventListener("click", () => {
+    if (state.admin.page > 1) {
+      state.admin.page--;
+      loadAdminUsers();
+    }
+  });
+
+  elements.adminNextBtn.addEventListener("click", () => {
+    if (state.admin.page < state.admin.totalPages) {
+      state.admin.page++;
+      loadAdminUsers();
+    }
+  });
+
+  let adminSearchTimeout = null;
+  elements.adminUsersSearch.addEventListener("input", (e) => {
+    clearTimeout(adminSearchTimeout);
+    adminSearchTimeout = setTimeout(() => {
+      state.admin.search = e.target.value.trim();
+      state.admin.page = 1;
+      loadAdminUsers();
+    }, 350);
+  });
+
+  elements.adminFilterPills.addEventListener("click", (e) => {
+    const pill = e.target.closest(".filter-pill");
+    if (!pill) return;
+
+    elements.adminFilterPills.querySelectorAll(".filter-pill").forEach(p => p.classList.remove("active"));
+    pill.classList.add("active");
+
+    state.admin.filter = pill.dataset.adminFilter;
+    state.admin.page = 1;
+    loadAdminUsers();
+  });
+
+  // ── Auth Modal (Sign In / Sign Up) ──────────────────────────
+  function openAuthModal(tab = "signin") {
+    switchAuthTab(tab);
+    elements.authModal.classList.add("active");
+  }
+
+  function closeAuthModal() {
+    elements.authModal.classList.remove("active");
+  }
+
+  function switchAuthTab(tab) {
+    document.querySelectorAll(".auth-tab-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.authTab === tab);
+    });
+    elements.signinForm.classList.toggle("active", tab === "signin");
+    elements.signupForm.classList.toggle("active", tab === "signup");
+  }
+
+  document.querySelectorAll(".auth-tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => switchAuthTab(btn.dataset.authTab));
+  });
+
+  elements.openSigninBtn.addEventListener("click", () => openAuthModal("signin"));
+  elements.closeAuthModal.addEventListener("click", closeAuthModal);
+
+  // Sign In submit
+  elements.signinForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = elements.signinEmail.value.trim();
+    const password = elements.signinPassword.value;
+
+    try {
+      const res = await API.users.signin(email, password);
+      if (res.ok && res.data && res.data.token) {
+        API.setToken(res.data.token);
+        showToast("Signed in successfully!", "success");
+        closeAuthModal();
+        await initSession();
+        loadFeed();
+      } else {
+        showToast(res.data?.message || "Invalid credentials", "error");
+      }
+    } catch (_) {
+      showToast("Network error connecting to backend", "error");
+    }
+  });
+
+  // Sign Up submit
+  elements.signupForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = elements.signupEmail.value.trim();
+    const password = elements.signupPassword.value;
+
+    try {
+      const res = await API.users.signup(email, password);
+      if (res.ok) {
+        showToast("Account created! Signing in...", "success");
+        // Auto sign in
+        const signinRes = await API.users.signin(email, password);
+        if (signinRes.ok && signinRes.data?.token) {
+          API.setToken(signinRes.data.token);
+          closeAuthModal();
+          await initSession();
+          loadFeed();
+        } else {
+          switchAuthTab("signin");
+          elements.signinEmail.value = email;
+        }
+      } else {
+        showToast(res.data?.message || "Registration failed", "error");
+      }
+    } catch (_) {
+      showToast("Network error registering account", "error");
+    }
+  });
+
+  // Demo Buttons
+  elements.demoAdminBtn.addEventListener("click", () => {
+    elements.signinEmail.value = "admin@admin.com";
+    elements.signinPassword.value = "adminADMIN123!";
+    elements.signinForm.dispatchEvent(new Event("submit"));
+  });
+
+  elements.demoUserBtn.addEventListener("click", () => {
+    elements.signinEmail.value = "user1@example.com";
+    elements.signinPassword.value = "Password123!";
+    elements.signinForm.dispatchEvent(new Event("submit"));
+  });
+
+  // Logout
+  elements.logoutBtn.addEventListener("click", async () => {
+    try {
+      await API.users.logout();
+    } catch (_) {}
+    API.clearToken();
+    state.currentUser = null;
+    updateNavForGuest();
+    showToast("Signed out", "info");
+    switchView("feed");
+  });
+
+  // ── Profile Modal ───────────────────────────────────────────
+  elements.userProfileTrigger.addEventListener("click", () => {
+    if (!state.currentUser) return;
+    const u = state.currentUser;
+    elements.profileModalAvatar.textContent = getInitials(u.email);
+    elements.profileModalAvatar.style.background = getAvatarColor(u.email);
+    elements.profileModalEmail.textContent = u.email;
+    elements.profileModalRole.textContent = u.role;
+    elements.profileModalRole.className = `role-badge role-${u.role}`;
+    elements.profileModalAge.textContent = u.age || "Not set";
+    elements.profileModalBirth.textContent = u.bitrthDate || (u.age ? new Date().getFullYear() - u.age : "—");
+    elements.updateAgeInput.value = u.age || "";
+
+    elements.profileModal.classList.add("active");
+  });
+
+  elements.closeProfileModal.addEventListener("click", () => elements.profileModal.classList.remove("active"));
+
+  // Update Age
+  elements.updateAgeForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const age = parseInt(elements.updateAgeInput.value, 10);
+    if (!age) return;
+
+    try {
+      const res = await API.users.updateProfile(age);
+      if (res.ok) {
+        showToast("Profile age updated", "success");
+        state.currentUser.age = age;
+        state.currentUser.bitrthDate = new Date().getFullYear() - age;
+        elements.profileModalAge.textContent = age;
+        elements.profileModalBirth.textContent = state.currentUser.bitrthDate;
+      } else {
+        showToast(res.data?.message || "Failed to update age", "error");
+      }
+    } catch (_) {
+      showToast("Network error", "error");
+    }
+  });
+
+  // Change Password
+  elements.changePasswordForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const currentPassword = elements.currentPasswordInput.value;
+    const newPassword = elements.newPasswordInput.value;
+
+    try {
+      const res = await API.users.changePassword(currentPassword, newPassword);
+      if (res.ok) {
+        showToast("Password changed successfully", "success");
+        elements.currentPasswordInput.value = "";
+        elements.newPasswordInput.value = "";
+        elements.profileModal.classList.remove("active");
+      } else {
+        showToast(res.data?.message || "Failed to change password", "error");
+      }
+    } catch (_) {
+      showToast("Network error", "error");
+    }
+  });
+
+  // Quick create button from navbar
+  elements.quickCreateBtn.addEventListener("click", () => {
+    switchView("feed");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    elements.composerContent.focus();
+  });
+
+  elements.brandLogo.addEventListener("click", () => switchView("feed"));
+  elements.navFeed.addEventListener("click", () => switchView("feed"));
+  elements.navMyPosts.addEventListener("click", () => switchView("my-posts"));
+  elements.navAdmin.addEventListener("click", () => switchView("admin"));
+
+  // Close modals on escape key or backdrop click
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      document.querySelectorAll(".modal-overlay.active").forEach(m => m.classList.remove("active"));
+    }
+  });
+
+  document.querySelectorAll(".modal-overlay").forEach(overlay => {
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        overlay.classList.remove("active");
+      }
+    });
+  });
+
+  // ── Init App ────────────────────────────────────────────────
+  async function init() {
+    if (window.location.protocol === "file:") {
+      const banner = document.createElement("div");
+      banner.style.cssText = "background:linear-gradient(90deg, #dc2626, #b91c1c);color:#fff;padding:14px 24px;text-align:center;font-weight:600;font-size:14px;position:sticky;top:0;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.6);border-bottom:1px solid rgba(255,255,255,0.2);";
+      banner.innerHTML = `⚠️ You opened this page directly from file explorer (<code>file://</code>). Web browsers block all API fetch requests on local file URLs. Please open <a href="http://localhost:4000" style="color:#fef08a;text-decoration:underline;font-weight:700;margin:0 4px;">http://localhost:4000</a> in your browser!`;
+      document.body.prepend(banner);
+      showToast("Open http://localhost:4000 to use the application", "error");
+    }
+
+    await initSession();
+    loadFeed();
+  }
+
+  init();
 });

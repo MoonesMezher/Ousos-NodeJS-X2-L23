@@ -6,6 +6,10 @@ const { signUpUserValidation, signInUserValidation } = require("../validation/us
 const auth = require("../middlewares/auth");
 const role = require("../middlewares/role");
 const id = require("../middlewares/id");
+const { loginLimiter } = require("../middlewares/limiter");
+
+router.get("/pagination", asyncHandler(usersController.pagination));
+router.get("/stats", [auth, role(["admin"])], asyncHandler(usersController.stats));
 
 // GET /api/v1/users  =>  all users (admin only)
 router.get("/", [auth, role(["admin"])], asyncHandler(usersController.getAll));
@@ -32,7 +36,7 @@ router.get("/:id", [...id, auth, role(["admin"])], asyncHandler(usersController.
 router.post("/signup", [...signUpUserValidation], asyncHandler(usersController.signup));
 
 // POST /api/v1/users/signin
-router.post("/signin", [...signInUserValidation], asyncHandler(usersController.signin));
+router.post("/signin", [loginLimiter, ...signInUserValidation], asyncHandler(usersController.signin));
 
 // POST /api/v1/users/logout
 router.post("/logout", [auth], asyncHandler(usersController.logout));

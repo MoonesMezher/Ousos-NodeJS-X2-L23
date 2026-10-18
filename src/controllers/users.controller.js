@@ -42,7 +42,6 @@ class UsersController {
     // POST /api/v1/users/signin
     signin = async (req, res) => {
         const { email, password } = req.body;
-
         const emailIsExist = await User.findOne({ email });
 
         if (!emailIsExist) {
@@ -56,7 +55,7 @@ class UsersController {
             return res.status(401).json({ message: "Try Again Later" });
         }
 
-        const passwordIsTrue = await hashService.compare(password, emailIsExist.password);
+        const passwordIsTrue = await emailIsExist.compare(password);
 
         if (!passwordIsTrue) {
             await blockHandler.fail(emailIsExist); // blockCount++ → save → re-check
@@ -66,12 +65,19 @@ class UsersController {
         await blockHandler.success(emailIsExist); // reset count, block, blockedUntil
 
         const token = jwtService.sign({ email });
+        emailIsExist.isLogedIn = true;
+        await emailIsExist.save();
 
         res.status(200).json({ message: "Logged in successfully", token });
     }
 
     // POST /api/v1/users/logout
     logout = async (req, res) => {
+        const id = req._user._id;
+        const user = await User.findById(id);
+        user.isLogedIn = false;
+        await user.save();
+
         res.status(200).json({ message: "Logged out successfully" });
     }
 
@@ -182,6 +188,51 @@ class UsersController {
         await user.save();
 
         res.status(200).json({ message: "Password Changed Successfully" });
+    }
+
+    pagination = async (req, res) => {
+        const page = +req.query.page || 1;
+        const limit = +req.query.limit || 10;
+        const search = req.query.email || req.query.search;
+        const blocked = req.query.blocked;
+
+        const query = {};
+        if (req.query.role) {
+            query.role = req.query.role;
+        }
+        if (search) {
+            query.email = { $regex: search, $options: "i" };
+        }
+        if (blocked === "true") {
+            query.block = true;
+        } else if (blocked === "false") {
+            query.block = false;
+        }
+
+        const data = await User.paginate(page, limit, query);
+        data.items = data.items.map(u => {
+            const { password, ...rest } = u;
+            return rest;
+        });
+
+        res.status(200).json(data);
+    }
+
+    // GET /api/v1/users/stats  =>  admin only
+    stats = async (req, res) => {
+        const totalUsers = await User.countDocuments();
+        const regularUsers = await User.countDocuments({ role: "user" });
+        const adminUsers = await User.countDocuments({ role: "admin" });
+        const blockedUsers = await User.countDocuments({ block: true });
+        const activeUsers = totalUsers - blockedUsers;
+
+        res.status(200).json({
+            totalUsers,
+            regularUsers,
+            adminUsers,
+            blockedUsers,
+            activeUsers
+        });
     }
 }
 
