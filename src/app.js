@@ -16,6 +16,7 @@ app.use(morgan("dev"));
 app.use(appLimiter)
 app.use(express.static(path.join(__dirname, "../client")));
 
+app.get("/health", (req, res) => res.status(200).json({ message: "System is healthy" }));
 app.use("/api/v1/posts", require("./routes/posts.routes"));
 app.use("/api/v1/users", require("./routes/users.routes"));
 
