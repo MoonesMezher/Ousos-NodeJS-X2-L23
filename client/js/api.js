@@ -1,9 +1,14 @@
 /* ============================================================
    COMMERCIAL API SERVICE LAYER
    ============================================================ */
-const BASE_URL = (typeof window !== "undefined" && (window.location.protocol === "http:" || window.location.protocol === "https:") && window.location.port === "4000")
-  ? "/api/v1"
-  : "http://localhost:4000/api/v1";
+const isLocalDevPort = typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") &&
+  window.location.port !== "" &&
+  window.location.port !== "4000";
+
+const BASE_URL = (isLocalDevPort || (typeof window !== "undefined" && window.location.protocol === "file:"))
+  ? "http://localhost:4000/api/v1"
+  : "/api/v1";
 
 const API = {
   // ── Token helpers ──────────────────────────────────────────
